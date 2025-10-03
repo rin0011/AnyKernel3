@@ -105,7 +105,7 @@ sd
 
 cat <<'pfsd'>> /data/adb/post-fs-data.d/kernel-conf.sh
 #!/system/bin/sh
-if ! echo $(uname -r) | grep -q "Epicmann24"; then
+if ! echo $(uname -r) | grep -q "android15-8"; then
 rm -rf /data/local/tmp/empty
 rm -f /data/adb/service.d/kernel-conf.sh
 rm -f /data/adb/post-fs-data.d/kernel-conf.sh
@@ -173,10 +173,5 @@ resetprop oplus.dex.tempcontrol false
 resetprop ro.oplus.radio.global_regionlock.log 0
 resetprop ro.boot.veritymode enforcing
 resetprop ro.boot.verifiedbootstate green
-
-mkdir -p /data/local/tmp/empty
-
-mount --bind /data/local/tmp/empty /product/priv-app/Facebook-installer
-mount --bind /data/local/tmp/empty /product/app/Facebook-appmanager
 
 pfsd
