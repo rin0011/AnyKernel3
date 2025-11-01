@@ -1,15 +1,16 @@
 ### AnyKernel3 Ramdisk Mod Script
+## KernelSU with SUSFS By Numbersf
 ## osm0sis @ xda-developers
 
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=krone Oplus kernel
+kernel.string=OnePlus Kernel by krone
 do.devicecheck=0
 do.modules=0
 do.systemless=0
 do.cleanup=1
-do.cleanuponabort=0
+do.cleanuponabort=1
 device.name1=
 device.name2=
 device.name3=
@@ -19,7 +20,6 @@ supported.versions=
 supported.patchlevels=
 supported.vendorpatchlevels=
 '; } # end properties
-
 
 ### AnyKernel install
 ## boot shell variables
@@ -34,144 +34,121 @@ no_magisk_check=1
 
 kernel_version=$(cat /proc/version | awk -F '-' '{print $1}' | awk '{print $3}')
 case $kernel_version in
+    4.1*) ksu_supported=true ;;
     5.1*) ksu_supported=true ;;
     6.1*) ksu_supported=true ;;
     6.6*) ksu_supported=true ;;
     *) ksu_supported=false ;;
 esac
 
-ui_print " " "  -> ksu_supported: $ksu_supported"
+ui_print "  -> ksu_supported: $ksu_supported"
 $ksu_supported || abort "  -> Non-GKI device, abort."
 
-# boot install
-if [ -L "/dev/block/bootdevice/by-name/init_boot_a" -o -L "/dev/block/by-name/init_boot_a" ]; then
-    split_boot # for devices with init_boot ramdisk
-    flash_boot # for devices with init_boot ramdisk
+# =============
+# 检测 Root 方式 (Magisk 检测)
+# =============
+if [ -d /data/adb/magisk ] || [ -f /sbin/.magisk ]; then
+    ui_print "============="
+    ui_print " 检测到 Magisk 或残留文件"
+    ui_print " 在此情况下刷写内核可能会导致设备变砖"
+    ui_print " 是否要继续安装？"
+    ui_print " Magisk has been detected (or residual files)."
+    ui_print " Flashing the kernel may brick your device"
+    ui_print " Do you want to continue?"
+    ui_print "-----------------"
+    ui_print " 音量上键：退出脚本 (推荐)"
+    ui_print " 音量下键：继续安装 (风险自负)"
+    ui_print " Volume UP: Exit script (recommended)"
+    ui_print " Volume DOWN: Continue installation (at your own risk)"
+    ui_print "============="
+
+    key_click=""
+    while [ "$key_click" = "" ]; do
+        key_click=$(getevent -qlc 1 | awk '{ print $3 }' | grep 'KEY_VOLUME')
+        sleep 0.2
+    done
+
+    case "$key_click" in
+        "KEY_VOLUMEUP")
+            ui_print " 您选择了退出脚本，已安全终止安装。"
+            ui_print " You chose to exit. Installation aborted safely."
+            exit 0
+            ;;
+        "KEY_VOLUMEDOWN")
+            ui_print " 您选择了继续安装，请注意风险!"
+            ui_print " You chose to continue installation. Proceed with caution!"
+            ;;
+        *)
+            ui_print " 未知按键输入，脚本已退出。"
+            ui_print " Unknown key input. Exiting script."
+            exit 1
+            ;;
+    esac
+fi
+
+ui_print "开始安装内核..."
+ui_print "Powered by krone"
+
+if [ -L "/dev/block/bootdevice/by-name/init_boot_a" ] || [ -L "/dev/block/by-name/init_boot_a" ]; then
+    split_boot
+    flash_boot
 else
-    dump_boot # use split_boot to skip ramdisk unpack, e.g. for devices with init_boot ramdisk
-    write_boot # use flash_boot to skip ramdisk repack, e.g. for devices with init_boot ramdisk
+    dump_boot
+    write_boot
 fi
-## end boot install
 
-
-rm -f /data/adb/service.d/kernel-conf.sh
-mkdir -p /data/adb/service.d
-touch /data/adb/service.d/kernel-conf.sh
-rm -f /data/adb/post-fs-data.d/kernel-conf.sh
-mkdir -p /data/adb/post-fs-data.d
-touch /data/adb/post-fs-data.d/kernel-conf.sh
-
-chmod +x /data/adb/post-fs-data.d/kernel-conf.sh
-chmod +x /data/adb/service.d/kernel-conf.sh
-
-cat <<'sd'>> /data/adb/service.d/kernel-conf.sh
-#!/system/bin/sh
-while [ "$(getprop sys.boot_completed)" != "1" ]; do
-sleep 5
-done
-sleep 5
-echo "off" > /proc/sys/kernel/printk_devkmsg
-for disks in /sys/block/*/queue; do
-echo 0 > "$disks/iostats"
-done
-echo 0 > /proc/sys/kernel/sched_schedstats
-echo "4674" > /sys/kernel/oplus_display/max_brightness
-echo "0" > /sys/devices/system/cpu/pmu_lib/enable_counters
-echo "1888" > /sys/class/qcom-haptics/vmax
-echo "8300" > /sys/class/qcom-haptics/cl_vmax
-echo "11451" > /sys/class/qcom-haptics/fifo_vmax
-echo "0 0 0 0" > /proc/sys/kernel/printk
-stop statsd
-stop criticallog
-stop traced
-stop traced_probes
-stop incidentd
-kill -STOP $(pidof dumpstate)
-kill -STOP $(pidof tombstoned)
-
-# You may uncomment the following line to acheive better performance/battery, but a small ammount of annoying bank apps may refuse to run
-#kill -STOP $(pidof logd)
-
-echo "0 25000" >/proc/shell-temp
-echo "1 25000" >/proc/shell-temp
-echo "2 25000" >/proc/shell-temp
-echo 0 > /sys/class/oplus_chg/battery/cool_down
-echo 0 > /sys/class/oplus_chg/battery/normal_cool_down
-echo 9100 > /sys/class/oplus_chg/battery/bcc_current
-chmod 0444 /sys/class/oplus_chg/battery/bcc_current
-chmod 0444 /sys/class/oplus_chg/battery/normal_cool_down
-chmod 0444 /sys/class/oplus_chg/battery/cool_down
-sd
-
-cat <<'pfsd'>> /data/adb/post-fs-data.d/kernel-conf.sh
-#!/system/bin/sh
-if ! echo $(uname -r) | grep -q "android15-8"; then
-rm -rf /data/local/tmp/empty
-rm -f /data/adb/service.d/kernel-conf.sh
-rm -f /data/adb/post-fs-data.d/kernel-conf.sh
-exit 0
+# =============
+# SUSFS 模块安装
+# =============
+if [ -f "$AKHOME/ksu_module_susfs_1.5.2+_Release.zip" ]; then
+    MODULE_PATH="$AKHOME/ksu_module_susfs_1.5.2+_Release.zip"
+    ui_print "  -> Found SUSFS Module (Release)"
+elif [ -f "$AKHOME/ksu_module_susfs_1.5.2+_CI.zip" ]; then
+    MODULE_PATH="$AKHOME/ksu_module_susfs_1.5.2+_CI.zip"
+    ui_print "  -> Found SUSFS Module (CI)"
+else
+    MODULE_PATH=""
+    ui_print "  -> No SUSFS Module found.You may have selected NON mode,skipping installation."
 fi
-sysctl -w vm.stat_interval=4320000
-echo 1 > /proc/sys/net/ipv4/tcp_window_scaling 2>/dev/null
-echo "4096 87380 16777216" > /proc/sys/net/ipv4/tcp_rmem 2>/dev/null
-echo "4096 65536 16777216" > /proc/sys/net/ipv4/tcp_wmem 2>/dev/null
-echo 16777216 > /proc/sys/net/core/rmem_max 2>/dev/null
-echo 16777216 > /proc/sys/net/core/wmem_max 2>/dev/null
-echo 4096 > /proc/sys/net/ipv4/tcp_max_syn_backlog 2>/dev/null
-echo 1 > /proc/sys/net/ipv4/tcp_mtu_probing 2>/dev/null
-echo "4096 87380 16777216" > /proc/sys/net/ipv6/tcp_rmem 2>/dev/null
-echo "4096 65536 16777216" > /proc/sys/net/ipv6/tcp_wmem 2>/dev/null
-resetprop persist.logd.flowctrl.on 0
-resetprop persist.logd.flowctrl.method 0
-resetprop persist.ims.disableQXDMLogs 1
-resetprop persist.vendor.ims.disableADBLogs 1
-resetprop persist.sys.log.user 0
-resetprop persist.sys.oplus.bt.cache_hcilog_mode 0
-resetprop persist.sys.oplus.need_log 0
-resetprop persist.sys.ostats_tpd.enable 0
-resetprop persist.sys.ostats_pullerd.enable 0
-resetprop persist.sys.ostatsd.enable 0
-resetprop persist.ims.disableADBLogs 1
-resetprop persist.ims.disableDebugLogs 1
-resetprop persist.ims.disableIMSLogs 1
-resetprop persist.sys.oplus.bt.switch_log.enable false
-resetprop persist.anr.dumpthr 0
-resetprop persist.sys.enable_adsp_dump 0
-resetprop persist.sys.enable_venus_dump 0
-resetprop persist.sys.oplus.wifi.fulldump.enable 0
-resetprop persist.sys.oplus.cvt.manager false
-resetprop persist.sys.oppo.junkmonitor false
-resetprop persist.vendor.service.bt.iotinfo.report.enable 0
-resetprop persist.sys.tasktracker.enable false
-resetprop persist.vendor.tracing.hsuart.enabled 0
-resetprop persist.traced.enable 0
-resetprop persist.device_config.aconfig_flags.runtime_native_boot.disable_lock_profiling true
-resetprop persist.device_config.runtime_native_boot.disable_lock_profiling true
-resetprop persist.sys.force_sw_gles 0
-resetprop sys.oplus.cvt.enable false
-resetprop sys.wifitracing.started 0
-resetprop sys.trace.traced_started 0
-resetprop sys.oplus.wifi.dump.needupload 0
-resetprop sys.oplus.wifi.dump.enable 0
-resetprop ro.oplus.minidump.kernel.log.support 0
-resetprop ro.oplus.wifi.minidump.enable.state 0
-resetprop ro.vendor.oplus.modemdump_enable 0
-resetprop ro.logd.flowctrl.on 0
-resetprop ro.logd.flowctrl.method 0
-resetprop ro.oplus.osense.uaf_enable false
-resetprop ro.oplus.osense.uaf_key_thread_enable false
-resetprop ro.oplus.osense.uaf_vip_binder_enable false
-resetprop ro.oplus.audio.thermal_control false
-resetprop debug.oplus.video.log.enable 0
-resetprop debug.sf.oplus_display_trace.enable 0
-resetprop debug.c2.use_dmabufheaps 0
-resetprop vendor.swvdec.log.level 0
-resetprop dalvik.vm.dex2oat-minidebuginfo 0
-resetprop dalvik.vm.minidebuginfo 0
-resetprop oplus.dex.tempcontrol false
 
-resetprop ro.oplus.radio.global_regionlock.log 0
-resetprop ro.boot.veritymode enforcing
-resetprop ro.boot.verifiedbootstate green
+if [ -n "$MODULE_PATH" ]; then
+    KSUD_PATH="/data/adb/ksud"
+    ui_print "============="
+    ui_print " 是否安装 SUSFS 模块？"
+    ui_print " Install susfs4ksu Module?"
+    ui_print "-----------------"
+    ui_print " 音量上键：跳过安装"
+    ui_print " 音量下键：安装模块"
+    ui_print " Volume UP: Skip installation"
+    ui_print " Volume DOWN: Install module"
+    ui_print "============="
 
-pfsd
+    key_click=""
+    while [ "$key_click" = "" ]; do
+        key_click=$(getevent -qlc 1 | awk '{ print $3 }' | grep 'KEY_VOLUME')
+        sleep 0.2
+    done
+
+    case "$key_click" in
+        "KEY_VOLUMEDOWN")
+            if [ -f "$KSUD_PATH" ]; then
+                ui_print " 正在安装 SUSFS 模块..."
+                ui_print " Installing SUSFS Module..."
+                /data/adb/ksud module install "$MODULE_PATH"
+                ui_print " 安装完成!"
+                ui_print " Installation complete!"
+            else
+                ui_print " 未找到 KSUD，跳过安装。"
+                ui_print " KSUD not found. Skipping installation."
+            fi
+            ;;
+        "KEY_VOLUMEUP")
+            ui_print " 已跳过 SUSFS 模块安装。"
+            ui_print " Skipped SUSFS Module installation."
+            ;;
+        *)
+            ui_print " 未知按键输入，已跳过 SUSFS 模块安装。"
+            ui_print " Unknown key input. Skipped SUSFS Module installation."
+            ;;
+    esac
+fi
